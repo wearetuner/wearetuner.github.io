@@ -1,7 +1,7 @@
 ---
 layout: post
 title:  "Chapter 05. 가비지 컬렉션 입문"
-date:   2018-08-12 21:30:28 +0900
+date:   2018-08-11 21:30:28 +0900
 categories: java performance tuning
 ---
 ### 가비지 컬렉터 개요

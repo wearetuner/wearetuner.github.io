@@ -1,7 +1,7 @@
 ---
 layout: post
 title:  "Chapter 02. 성능 테스트 접근법"
-date:   2018-08-18 20:19:28 +0900
+date:   2018-08-08 20:19:28 +0900
 categories: java performance tuning
 ---
 # 02. 성능 테스트 접근법
