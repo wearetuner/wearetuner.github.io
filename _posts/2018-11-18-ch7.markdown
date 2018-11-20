@@ -44,8 +44,12 @@ $ jcm pid GC.heap_dump /path/to/heap_dump.hprof     # mac에서 실패
 $ jhat {dump 파일 경로}                     # http 서버로 실행, 브라우저에서 확인가능
 $ jvisualvm --openfile {dump 파일 경로}     # jhat보다 기능이 많아서 더 보기 쉽다. 쿼리를 날려서 결과가능하나 쿼리 공부해야한다
 
-개인적으로 jhat보다 jvisualvm 사용할것 같고,  [mat](https://www.eclipse.org/mat/)은 사용한적이 없다. 기능만 봤을때는 jvisualvm과 유사할듯하다
+개인적으로 jhat보다 jvisualvm 사용할것 같고, [mat](https://www.eclipse.org/mat/)은 사용한적이 없다.
+하지만 mat이 기능만 봤을때는 jvisualvm보다 파워풀하다.
 ```
+* mat은 GC root를 추적하기 쉽고, Shallow heap(객체가 가진 사이즈),  Retained Heap(객체가 참조하는 다른 객체의 크기 포함한 사이즈)별로 병렬로
+보여준다.
+* [mat 사용법](https://m.blog.naver.com/PostView.nhn?blogId=2feelus&logNo=220780114184&proxyReferer=https%3A%2F%2Fwww.google.co.kr%2F)
 
 #### 얕은 객체 vs 깊은 객체 크기
 * 얕다 (shallow) 객체 자체의 크키, 객체가 다른 객체 참조를 갖고 있다면 참조가 포함되지만 대상 객체의 크기는 포함되지 않는다.
@@ -62,8 +66,69 @@ $ jvisualvm --openfile {dump 파일 경로}     # jhat보다 기능이 많아서
 
 
 ## 3. 메모리부족 에러
+#### 네이티브 메모리 부족
+힙과 상관없음
+```
+Exception in thread "main" java.lang.OutOfMemoryError:
+unable to create new native thread
+```
 * native memory
   - 32bit JVM 프로세스의 최대크기는 4GB
 * 퍼머넌트 제너레이션, 메타스페이스 부족
   - 자바7 퍼버먼트 제너레이션 부족:  더 많은 클래스 사용
   - 자바8 메사스페이스 네이티브 메모리 꽉 차서 발생
+
+
+#### 퍼머넌트 제너레이션 or 메타스페이스 메모리 부족
+힙과 상관없음
+```
+자바 8
+Exception in threac "main" java.lang.OutOfMemoryError: Metaspace
+
+자바 7
+Exception in thread "main" java.lang.OutOfMemoryError: PermGen space
+```
+* 어플리케이션 기본 perm(퍼머넌트) 공간 크기보다 더 많은 클래스 사용 => 크기 올리기
+* 클래스로더 memory leak
+  - 클래스로더가 새 클래스를 로드하기 위해 생성되며, 기존 클래스 로더 영역을 벗어남 => 영역 밖으로 나가면 메타데이터 수집
+  - 클래스로더가 영역밖으로 나가지 않으면, 메타데이터는 해제될 수 없고, 퍼머넌트 제너레이션 가득차고, memory leak 발생
+  - 반드시 클래스로더 자체가 정확하게 폐기되도록 주의해서 작업, ClassLoader 인스턴스 전부 찾고, GC 루트 추적
+
+#### 힙 메모리 부족
+```
+Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+```
+* 유효 객체의 수 > heap space
+* 크기를 늘리면 일시적으로 이슈를 해결할 수 있지만, 에러가 발생되는 시기만 지연시킬 수 있다.
+* 힙 덤프, **객체들의 수를 줄이는데 초점을 맞춰야 한다.**
+* mat로 힙 히스토그램 차이점 확인 가능
+* 힙 메모리 부족은 발생 시점은 예측이 어렵다. JVM 플래그를 사용하여 자동 Heap dump 가능하다.
+```
+-XX:+HeapDumpOnOutOfMemoryError
+: default=false로 메모리 부족 에러 발생때마다 JVM 힙 덤프
+
+-XX:HeapDumpPath=<path>
+: default=현재 작업 디렉토리 java_pid<pid>.hprof
+
+-XX:+HeapDumpAfterFulGC
+: Full GC 수행 후
+
+-XX:+HeapDumpBeforeFulGC
+: Full GC 수행 전
+```
+
+#### GC 오버헤드 한계
+```
+Exception in thread "main" java.lang.OutOfMemoryError: GC overhead limit exceeded
+
+발생 조건
+1. -XX:GCTimeLimit=N 에서 정의한 값 초과, default=98
+2. -XX:GCHeapFreeLimit=N 정의한 값보자 작다, default=2%
+3. 위의 두 조건, 다섯 번의 연속적인 풀 GC에서 참
+4. -XX:UseGCOverheadLimit, default=true
+```
+* GC를 수행하는데 시간이 너무 오래 걸린다.
+* 메모리부족 에러가 발생하지 않는 App에서 다섯 번 이상 연속적으로 Full GC 발생하는 경우 흔하다.
+  - 시간이 98%를 쓰더라도, 힙의 2% 이상이 해제되기 때문 => GCHeapFreeLimit 값 키우기
+
+## 2. 메모리 적게 사용하기
