@@ -1,0 +1,119 @@
+---
+layout: post
+title:  "Chapter 03. 자바 성능 도구 상자"
+date:   2018-08-09 20:19:28 +0900
+categories: java performance tuning
+---
+
+# _성능 분석을 위한 데이터를 수집할 수 있도록 도와주는 도구 들에 대하여 알아보자!_
+
+## 1. 운영체제 도구와 분석
+  성능 테스트를 할 때 CPU 사용률, 디스크 사용률, 네트워크 사용률에 대한 정보를 운영체제로 부터 얻을 수 있다.
+  유닉스에는 sar(System Accounting Report)로 **vmstat, iostat, prstat** 도구가 있고,
+  윈도우에는 typeperf 명령어 유틸리티가 있다.
+
+  - # CPU 사용률
+``` bash
+vmstat
+```
+    ##### 사용자 시간 : CPU가 애플리케이션 코드를 실행하는 시간의 백분율
+    ##### 시스템 시간 : CPU가 커널 코드를 실행시키는 시간의 백분율
+    #### **성능에서의 목표는 짧은 시간 동안 CPU 사용률을 높이는 것이 목적!**
+
+  - # 디스크 사용률
+``` bash
+manila:user > iostat
+          disk0               disk2       cpu    load average
+KB/t  tps  MB/s     KB/t  tps  MB/s  us sy id   1m   5m   15m
+54.43   13  0.67    75.40    0  0.00   3  2 95  2.66 2.90 2.68
+```
+    ##### 디스크 사용률 모니터링의 목적은
+    ##### ① 애플리케이션에서 디스크 I/O가 병목이 되고 있는지, ② 시스템의 swap 현상을 모니터링하기 위함이다.
+
+  - # 네트워크 사용률
+``` bash
+manila:user > netstat
+Active Internet connections
+Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)
+tcp4       0      0  pool-70-110-12-2.54115 17.252.236.212.5223    SYN_SENT
+tcp4       0      0  pool-70-110-12-2.54114 17.252.236.228.5223    SYN_SENT
+tcp4       0      0  pool-70-110-12-2.54113 17.252.236.225.5223    SYN_SENT
+tcp4       0      0  pool-70-110-12-2.54112 17.252.236.221.5223    SYN_SENT
+tcp4       0      0  pool-70-110-12-2.54107 17.252.236.141.5223    SYN_SENT
+tcp4       0      0  pool-70-110-12-2.54106 17.252.237.23.5223     SYN_SENT
+tcp4       0      0  pool-70-110-12-2.54105 17.252.236.150.5223    SYN_SENT
+tcp4       0      0  pool-70-110-12-2.54104 17.252.236.32.5223     SYN_SENT
+tcp4       0      0  localhost.terabase     localhost.54099        ESTABLISHED
+tcp4       0      0  localhost.terabase     localhost.54098        ESTABLISHED
+tcp4       0      0  localhost.54099        localhost.terabase     ESTABLISHED
+tcp4       0      0  localhost.54098        localhost.terabase     ESTABLISHED
+```
+    네트워크 이용률을 계산하는 것이 아니라 읽고 쓰는 데이터의 양을 보여주므로 직접 스크립트로 계산을 수행하고 인터페이스의 태역폭을 결정해야 한다.
+
+
+## 2. 자바 모니터링 도구
+  JVM 자체를 분석하기 위한 도구로 **jcmd, jconsole, jhat, jmap, jinfo, jstack, jstat, jvisualvm** 등이 있다.
+
+  자바 모니터링 도구를 통하여
+
+  ① 기본 VM 정보 : 가동시간, 시스템 속성, JVM 버전, JVM 커맨드 라인, JVM 튜닝 플래그 등 실행중인 JVM 프로세스에 대한 기본 정보를 제공
+
+  + #### 튜닝 플래그로 작업하기
+   `-XX:+PrintFlagsFinal` 옵션으로 특정 플랫폼에 설정된 디폴트 플래그 값을 알아낼 수 있다.
+
+     출력결과
+     + := 는 디폴트가 아닌 값이 대상 플래그에 사용되고 있음을 나타내고, = 는 디폴트 값이 사용되고 있음을 나타낸다.
+     + {product}는 플래그의 디폴트 설정이 모든 플랫폼에서 동일함을 나타내고, {pd product}는 플랫폼에 따라 디폴트 설정이 달라짐을 나타낸다.
+     + manageable는 런타임 동안 동적으로 변경 가능한 플래그임을 의미한다.
+     + C2 diagnostic는 진단 결과를 제공하는 플래그임을 의미한다.
+
+  + jcmd : 실행 중인 애플리케이션에 대한 모든 튜닝 플래그의 값을 포함해서 기본 JVM 정보를 찾고, 자동으로 중요한 데이터를 모을 수 있으므로 자동 성능 테스트를 할 때 반드시 모니터링하는 것이 좋다.
+  + jinfo : 프로그램이 실행되는 동안 특정 플래그 값을 변경할 수 있는 것이 장점으로 실행 중인 어플리케이션에 대한 정보를 보기에 좋다.
+    `jinfo -flags process_id` 프로세스 내의 모든 플래그 값을 검색
+    `jinfo -flag PrintGCDetails process_id` 개별 플래그의 값을 검색
+
+
+  ② 스레드 정보
+  ``` bash
+  jstack process_id
+  jcmd process_id Thread.print
+  ```
+   위의 명령어로 스레드의 스택 정보를 얻어 스레드가 블락 되어있는지 알 수 있다.
+
+  ③ 클래스 정보
+
+  ④ GC 활동 내역 모니터링을 통한 동작중인 GC 분석
+
+  ⑤ 힙 덤프 후처리
+
+  등의 정보를 얻을 수 있다.
+
+
+## 3. 프로파일링 도구
+##### 자바 프로파일링 도구는 자바로 작성되고 대상 애플리케이션과 프로파일러가 소켓을 통해 연결되어 동작되므로 데이터 제어에 주의가 필요하다.
+##### 프로파일러는 성능에 병목을 일으키는 원인을 찾을 수 있는 도구이며, 최적화 시켜야 할 코드 영역을 찾기 위해 사용해야 한다.
+
+  - #### 샘플링 프로파일러
+    프로파일링의 기본 모드이며 최소한의 오버헤드로 동작되는 저사양의 프로파일러이다.
+
+  - #### 장착형 프로파일러 (Instrumented Mode)
+    샘플링 프로파일러보다 애플리케이션에 대하여 더 많은 정보를 얻을 수 있지만, 더 큰 영향을 줄 가능성이 있다.
+
+  - #### 네이티브 프로파일러
+    JVM 자체를 프로파일하여 JVM 코드와 애플리케이션 코드를 모두 가시화 시켜주며, 이것으로 얻을 수 있는 핵심 정보는 애플리케이션이 GC 에서 쓰고 있는 시간이다.
+
+
+## 4. 자바 미션 컨트롤
+  Java7 상용, Java8에 신규 모니터링과 컨트롤 기능의 Java Mission Control 이 포함되었으며 전체 시스템 모니터링이 가능하다. but 상용 라이선스로만 사용 가능.
+
+  - #### 자바 플라이트 레코더 (Java Flight Recorder, JFR)
+    JFR의 데이터는 JVM의 과거 성능과 동작을 진단할 수 있는 JVM 내 이벤트 이력이다.
+
+  - #### JFR 활성화시키기
+    `-XX:+UnlockCommercialFeatures -XX:+FlightRecorder` 커맨드로 활성화 가능하다.
+
+    레코딩 프로세스 활성화를 위해서는 자바 미션 컨트롤의 GUI나 `jcmd process_id JRF.start [option_list]`로 시작할 수 있다.
+    `XX:+FlightRecorderOptions=string` 으로 옵션을 제어할 수 있으며, 연속 모드시 데이터 스트림은 원형 버퍼가 이용된다.
+
+  - #### JFR 이벤트 선별
+    이벤트들의 기간이 어떤 한계치를 넘어설 때만 수집 되어 JFR은 성능 분석 뿐만 아니라 실패 되는 이벤트를 검토하는데도 유용하다.

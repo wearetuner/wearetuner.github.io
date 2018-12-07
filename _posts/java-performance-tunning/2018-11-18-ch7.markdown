@@ -1,0 +1,179 @@
+---
+layout: post
+title:  "Chapter 07. 힙 메모리 베스트 프랙티스"
+date:   2018-11-19 00:00:00 +0900
+categories: heap memory best practice
+---
+
+# 베스트 프랙티스
+* **어떤 객체가 메모리를 소비하고 있는지 파악**
+* 객체를 적게 생성, 가능한 빨리 폐기한다
+* 특정 종류의 객체가 자주 재생성되면 전반적으로 성능 저하, 재사용하라
+  - ex) 쓰레드 로컬 변수, 특별 객체 참조, 객체 풀을 포함 객체 재사용
+
+## 1. 힙 분석
+#### 힙 히스토그램 (Heap histogram)
+힙 덤프는 분석하는데 시간이 오래 걸리며, 디스크 공간을 많이 차지한다.
+전체 힙 덤프 없이 어플리케이션 내 많은 객체를 빨리 살펴볼 수 있는 방법이다.
+**특정 객체가 너무 많이 생성되서 발생되는 메모리 부족 이슈는 힙 히스토그램을 이용해 빨리 찾을 수 있다.**
+
+```
+$ ps -ef | grep spring                  # pid
+$ jcmd pid GC.class_histogram           # 살아있는 객체만 포함
+$ jmap -histo pid                       # 죽은 객체 포함
+$ jmap -histo pid | grep com.sds.act    # 특정 패키지만 포함
+$ jmap -histo:live pid                  # Full GC 강제 실행, 살아있는 객
+
+```
+
+* spring-boot app을 실행해보면 제일 먼저 뜨는게 자바 자료구조 객체, 나머지는 대부분 spring 어플리케이션이 뜨는데 필요한 객체들
+이 사이에 Controller, Service, Repository 또는 직접 설계한 객체가 많은 메모리를 사용하면 튜닝의 대상이 된다.
+
+
+## 2. 힙 덤프
+히스토그램은 한두개 특정 클래스의 인스턴스를 너무 많이 할당하면서 일으키는 이슈를 파악하기는 좋으나 심도 있는 분석을 위해서는 힙 덤프 필요
+**메모리 사용량을 찾아 낼 수 있는 가장 강력한 기술이다.**
+
+```
+$ jmap -dump:live,file=/path/to/heap_dump.hprof pid
+$ jcm pid GC.heap_dump /path/to/heap_dump.hprof     # mac에서 실패
+```
+
+```
+생성된 덤프 파일 연결
+$ jhat {dump 파일 경로}                     # http 서버로 실행, 브라우저에서 확인가능
+$ jvisualvm --openfile {dump 파일 경로}     # jhat보다 기능이 많아서 더 보기 쉽다. 쿼리를 날려서 결과가능하나 쿼리 공부해야한다
+
+개인적으로 jhat보다 jvisualvm 사용할것 같고, [mat](https://www.eclipse.org/mat/)은 사용한적이 없다.
+하지만 mat이 기능만 봤을때는 jvisualvm보다 파워풀하다.
+```
+* mat은 GC root를 추적하기 쉽고, Shallow heap(객체가 가진 사이즈),  Retained Heap(객체가 참조하는 다른 객체의 크기 포함한 사이즈)별로 병렬로
+보여준다.
+* [mat 사용법](https://m.blog.naver.com/PostView.nhn?blogId=2feelus&logNo=220780114184&proxyReferer=https%3A%2F%2Fwww.google.co.kr%2F)
+
+#### 얕은 객체 vs 깊은 객체 크기
+* 얕다 (shallow) 객체 자체의 크키, 객체가 다른 객체 참조를 갖고 있다면 참조가 포함되지만 대상 객체의 크기는 포함되지 않는다.
+* 깊은 (deep) 객체 크기는 객체들의 크기 포함
+
+* 힙의 지배자(dominator) : 커다란 힙 공간을 보유한 객체
+  - 힙의 지배자 객체 덜 생성, 짧은 기간만 보유, 객체 그래프 탐색 단순화, 더 작게 만들기
+  - 보통 클래스 로더 크기 가장 크고, 제어할 수 없다.
+
+* GC 루트로 바로 접근한 하는 것이 반드시 유용한 것은 아니다.
+  - 대상 객체를 참조하는 스태틱, 글로벌 참조 일부를 가진 시스템 객체
+  - 시스템이나 부트스트랩 클래스 패스로 로드된 클래스이 스태틱 변수에서 비롯된다.
+  - Thread 클래스, 모든 활성 스레드 포함
+
+
+## 3. 메모리부족 에러
+#### 네이티브 메모리 부족
+힙과 상관없음
+```
+Exception in thread "main" java.lang.OutOfMemoryError:
+unable to create new native thread
+```
+* native memory
+  - 32bit JVM 프로세스의 최대크기는 4GB
+* 퍼머넌트 제너레이션, 메타스페이스 부족
+  - 자바7 퍼버먼트 제너레이션 부족:  더 많은 클래스 사용
+  - 자바8 메사스페이스 네이티브 메모리 꽉 차서 발생
+
+
+#### 퍼머넌트 제너레이션 or 메타스페이스 메모리 부족
+힙과 상관없음
+```
+자바 8
+Exception in threac "main" java.lang.OutOfMemoryError: Metaspace
+
+자바 7
+Exception in thread "main" java.lang.OutOfMemoryError: PermGen space
+```
+* 어플리케이션 기본 perm(퍼머넌트) 공간 크기보다 더 많은 클래스 사용 => 크기 올리기
+* 클래스로더 memory leak
+  - 클래스로더가 새 클래스를 로드하기 위해 생성되며, 기존 클래스 로더 영역을 벗어남 => 영역 밖으로 나가면 메타데이터 수집
+  - 클래스로더가 영역밖으로 나가지 않으면, 메타데이터는 해제될 수 없고, 퍼머넌트 제너레이션 가득차고, memory leak 발생
+  - 반드시 클래스로더 자체가 정확하게 폐기되도록 주의해서 작업, ClassLoader 인스턴스 전부 찾고, GC 루트 추적
+
+#### 힙 메모리 부족
+```
+Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+```
+* 유효 객체의 수 > heap space
+* 크기를 늘리면 일시적으로 이슈를 해결할 수 있지만, 에러가 발생되는 시기만 지연시킬 수 있다.
+* 힙 덤프, **객체들의 수를 줄이는데 초점을 맞춰야 한다.**
+* mat로 힙 히스토그램 차이점 확인 가능
+* 힙 메모리 부족은 발생 시점은 예측이 어렵다. JVM 플래그를 사용하여 자동 Heap dump 가능하다.
+```
+-XX:+HeapDumpOnOutOfMemoryError
+: default=false로 메모리 부족 에러 발생때마다 JVM 힙 덤프
+
+-XX:HeapDumpPath=<path>
+: default=현재 작업 디렉토리 java_pid<pid>.hprof
+
+-XX:+HeapDumpAfterFulGC
+: Full GC 수행 후
+
+-XX:+HeapDumpBeforeFulGC
+: Full GC 수행 전
+```
+
+#### GC 오버헤드 한계
+```
+Exception in thread "main" java.lang.OutOfMemoryError: GC overhead limit exceeded
+
+발생 조건
+1. -XX:GCTimeLimit=N 에서 정의한 값 초과, default=98
+2. -XX:GCHeapFreeLimit=N 정의한 값보자 작다, default=2%
+3. 위의 두 조건, 다섯 번의 연속적인 풀 GC에서 참
+4. -XX:UseGCOverheadLimit, default=true
+```
+* GC를 수행하는데 시간이 너무 오래 걸린다.
+* 메모리부족 에러가 발생하지 않는 App에서 다섯 번 이상 연속적으로 Full GC 발생하는 경우 흔하다.
+  - 시간이 98%를 쓰더라도, 힙의 2% 이상이 해제되기 때문 => GCHeapFreeLimit 값 키우기
+
+## 4. 메모리 적게 사용하기
+메모리 적게 쓰기 => 힙이 덜 찬다 => GC 주기가 덜 필요하다.
+```
+* Young generation 에 컬렉션이 더 적다. 객체ㅔ의 재임 기간이 덜 자주 늘어난다.
+* 객체가 Old generation 으로 승격될 가능성이 더 줄어든다.
+* Full GC (Parallel GC) 구기가 줄어든다. 
+```
+
+#### 객체 크기 줄이기
+인스턴스 변수의 개수를 (명시적으로) 감소시키고, 변수의 크기를 (덜 명시적으로 ) 줄이면 객체의 크기는 줄어든다.
+```
+byte 1, char 2, short 2, int 4, float 4, long 8, double 8,
+일반 객체  32bit JVM 8, 64bit JVM 16 / array는 2배
+
+null 인스턴스 변수도 객체 클래스 공간을 소비한다.
+```
+* intelij analyze에서 사용하지 않는 변수 삭제하는 이유
+
+#### 객체의 지연 초기화
+대상 동작이 자주 사용할때만 유효하다.  오히려 자주 사용되는 경우 성능상의 불이익
+ex) 싱글톤 패턴
+
+* thread-safe한 경우, synchronized => 병목
+  - 자주 사용하게 되면, 메모리 절약 효과는 없고, 성능상의 불이익
+  - 개선 방법? 이중 검사방식 1) 변수는 [volatile](http://thswave.github.io/java/2015/03/08/java-volatile.html) 타입 2) 인스턴스 변수를 로컬변수로 할
+
+#### 불변과 정규 객체 사용하기
+자바에서 많은 객체가 불변형 ex) 기본형 (Integer, Double, Boolean) + BigDecimal 숫자 기반 + String
+
+* 객체가 빨리 생성되고 영 컬렉션에 영향, 불변 객체가 다수의 old generation으로 승격되면 성능 저하
+* 동일한 객체의 복사본 생성을 피함, Boolean 객체 경우 Boolean.TRUE, Boolean.FALSE 만 반환 => 힙 사용률 높아지는 것을 방지
+* 문자열 연결
+  - 다수의 문자열 중복 확인, Eclipse Memory Analyzer 보유 크기 계산, 중복되는 크기의 경우, 문자열을 연결하여 메모리 절약 가능
+ 
+ 
+## 5. 객체 생명 주기 관리
+보통 개발자는 객체의 생명주기 관리를 하지 않음. 가비지컬렉터에 의존한다. 객체 생성비용이 비싼 경우, 최선이 아닐때가 있다.
+
+#### 객체 재사용
+Full GC를 수행하는데 걸리는 시간은  old generation에 살아있는 객체 수에 비례한다. **살아있는 데이터의 수는 힙의 크기보다 더 중요하다.**
+객체가 힙 내에 있는 기간이 더 늘어날수록 GC의 효율은 줄어든다. (동시 병렬 실패가 일어날 가능성이 크다)
+* object pool
+  - JDBC connection pool
+  - 네트워크 연결 생성, 로그인, 데이터베이스 생성 설정 => 작업 비용이 많이 든다. 풀링을 통해서 성능이 크게 좋아진다.
+* thread-local variable
+  - 쓰레드는 생성 시간 절약을 위해 풀로 구성 
