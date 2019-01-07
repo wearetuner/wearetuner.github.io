@@ -12,4 +12,4 @@
   - http://www.kyobobook.co.kr/product/detailViewKor.laf?mallGb=KOR&ejkGb=KOR&barcode=9791186697139
 * 2기. ![Node.js 디자인 패턴](https://github.com/wearetuner/wearetuner.github.io/blob/master/static/images/nodejs-design-pattern.jpg)
   - http://www.kyobobook.co.kr/product/detailViewKor.laf?ejkGb=KOR&mallGb=KOR&barcode=9788931459425
- 
+  - 실습 repository : https://github.com/wearetuner/node-design-pattern 
