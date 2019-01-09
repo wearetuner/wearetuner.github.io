@@ -76,7 +76,7 @@ categories: node, nodejs, nodejs-design-pattern, design-pattern
 
 #### 이벤트 디멀티플렉서 (이벤트 통지 인터페이스)
 * 감시된 일련의 리소스들로부터 들어오는 I/O 이벤트를 수집하여 큐에 넣고, 처리할 수 있는 새 이벤트가 있을 때까지 차단
-![event-demultiplexer](https://github.com/wearetuner/node-design-pattern/resources/images/node_event_demultiplexer.jpeg)
+![event-demultiplexer](https://github.com/wearetuner/node-design-pattern/blob/master/resources/images/node_event_demultiplexer.jpeg)
 * event loop
   - 각 이벤트와 관련된 리소스는 읽기 작업을 위한 준비가 되어 있고, 차단되지 않은 상황 보증
   - 이벤트가 처리되고 나면, 다시 디멀티플렉서에서 처리 가능한 이벤트가 발생할때까지 차단
